@@ -86,7 +86,7 @@ Keep each section to 2-4 sentences. Be precise and use appropriate technical ter
 
     try {
       const stream = await anthropic.messages.stream({
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'claude-sonnet-4-5',
         max_tokens: 1024,
         messages: [{ role: 'user', content: prompt }],
       });
@@ -107,7 +107,7 @@ Keep each section to 2-4 sentences. Be precise and use appropriate technical ter
         data: {
           paper: { connect: { s2PaperId: s2Id } },
           summaryText: fullSummary,
-          modelUsed: 'claude-3-5-sonnet-20241022',
+          modelUsed: 'claude-sonnet-4-5',
         },
       });
 

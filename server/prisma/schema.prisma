@@ -63,7 +63,7 @@ model Summary {
   id          String   @id @default(cuid())
   paperId     String   @unique
   summaryText String   @db.Text
-  modelUsed   String   @default("claude-3-5-sonnet-20241022")
+  modelUsed   String   @default("claude-sonnet-4-5")
   createdAt   DateTime @default(now())
   paper       Paper    @relation(fields: [paperId], references: [id], onDelete: Cascade)
 
