@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 
 const BASE_URL = 'https://api.semanticscholar.org/graph/v1';
 const API_KEY = process.env.SEMANTIC_SCHOLAR_API_KEY;
@@ -9,18 +9,46 @@ const PAPER_FIELDS =
 const s2 = axios.create({
   baseURL: BASE_URL,
   headers: API_KEY ? { 'x-api-key': API_KEY } : {},
-  timeout: 15000,
+  timeout: 20000,
 });
 
-// Rate limit: 1 req/sec without key, higher with key
-let lastRequest = 0;
+// Strict 1 req/sec queue — one request completes before the next is allowed
+// Using a promise chain so concurrent callers queue up properly
+let requestQueue: Promise<unknown> = Promise.resolve();
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 async function rateLimited<T>(fn: () => Promise<T>): Promise<T> {
-  const delay = API_KEY ? 200 : 1100; // ms between requests
-  const now = Date.now();
-  const wait = delay - (now - lastRequest);
-  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  lastRequest = Date.now();
-  return fn();
+  // Each call chains onto the previous, enforcing sequential execution with delay
+  const result = requestQueue.then(async () => {
+    const res = await fn();
+    // Wait 1.1 sec after each request regardless of API key status
+    // (S2 free tier is 1 req/sec; with a key it's higher but we stay safe)
+    await sleep(API_KEY ? 300 : 1100);
+    return res;
+  });
+  // Update the queue to wait for this call (swallow errors so queue never stalls)
+  requestQueue = result.catch(() => {});
+  return result;
+}
+
+async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const status = (err as AxiosError)?.response?.status;
+      if (status === 429 && attempt < retries) {
+        // Back off exponentially on rate limit
+        await sleep(2000 * (attempt + 1));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('Max retries exceeded');
 }
 
 export interface S2Paper {
@@ -50,61 +78,68 @@ export interface S2CitationEdge {
 }
 
 export async function searchPapers(query: string, limit = 20): Promise<S2Paper[]> {
-  return rateLimited(async () => {
-    const res = await s2.get('/paper/search', {
-      params: { query, fields: PAPER_FIELDS, limit },
-    });
-    return (res.data.data ?? []) as S2Paper[];
-  });
+  return rateLimited(() =>
+    withRetry(async () => {
+      const res = await s2.get('/paper/search', {
+        params: { query, fields: PAPER_FIELDS, limit },
+      });
+      return (res.data.data ?? []) as S2Paper[];
+    })
+  );
 }
 
 export async function getPaper(paperId: string): Promise<S2Paper | null> {
-  return rateLimited(async () => {
-    try {
-      const res = await s2.get(`/paper/${paperId}`, {
-        params: { fields: PAPER_FIELDS },
-      });
-      return res.data as S2Paper;
-    } catch (err: any) {
-      if (err.response?.status === 404) return null;
-      throw err;
-    }
-  });
+  return rateLimited(() =>
+    withRetry(async () => {
+      try {
+        const res = await s2.get(`/paper/${paperId}`, {
+          params: { fields: PAPER_FIELDS },
+        });
+        return res.data as S2Paper;
+      } catch (err: any) {
+        if (err.response?.status === 404) return null;
+        throw err;
+      }
+    })
+  );
 }
 
-export async function getReferences(paperId: string, limit = 50): Promise<S2CitationEdge[]> {
-  return rateLimited(async () => {
-    const res = await s2.get(`/paper/${paperId}/references`, {
-      params: {
-        fields: 'paperId,title,year,citationCount,isInfluential',
-        limit,
-      },
-    });
-    return (res.data.data ?? []).map((d: any) => ({
-      ...d.citedPaper,
-      isInfluential: d.isInfluential,
-    })) as S2CitationEdge[];
-  });
+export async function getReferences(paperId: string, limit = 30): Promise<S2CitationEdge[]> {
+  return rateLimited(() =>
+    withRetry(async () => {
+      const res = await s2.get(`/paper/${paperId}/references`, {
+        params: {
+          fields: 'paperId,title,year,citationCount,isInfluential',
+          limit,
+        },
+      });
+      return (res.data.data ?? []).map((d: any) => ({
+        ...d.citedPaper,
+        isInfluential: d.isInfluential,
+      })) as S2CitationEdge[];
+    })
+  );
 }
 
 export async function getCitations(paperId: string, limit = 30): Promise<S2CitationEdge[]> {
-  return rateLimited(async () => {
-    const res = await s2.get(`/paper/${paperId}/citations`, {
-      params: {
-        fields: 'paperId,title,year,citationCount,isInfluential',
-        limit,
-      },
-    });
-    return (res.data.data ?? []).map((d: any) => ({
-      ...d.citingPaper,
-      isInfluential: d.isInfluential,
-    })) as S2CitationEdge[];
-  });
+  return rateLimited(() =>
+    withRetry(async () => {
+      const res = await s2.get(`/paper/${paperId}/citations`, {
+        params: {
+          fields: 'paperId,title,year,citationCount,isInfluential',
+          limit,
+        },
+      });
+      return (res.data.data ?? []).map((d: any) => ({
+        ...d.citingPaper,
+        isInfluential: d.isInfluential,
+      })) as S2CitationEdge[];
+    })
+  );
 }
 
 export async function batchGetPapers(paperIds: string[]): Promise<S2Paper[]> {
   if (paperIds.length === 0) return [];
-  // Max 500 per batch request
   const chunks: string[][] = [];
   for (let i = 0; i < paperIds.length; i += 500) {
     chunks.push(paperIds.slice(i, i + 500));
@@ -112,7 +147,9 @@ export async function batchGetPapers(paperIds: string[]): Promise<S2Paper[]> {
   const results: S2Paper[] = [];
   for (const chunk of chunks) {
     const res = await rateLimited(() =>
-      s2.post('/paper/batch', { ids: chunk }, { params: { fields: PAPER_FIELDS } })
+      withRetry(() =>
+        s2.post('/paper/batch', { ids: chunk }, { params: { fields: PAPER_FIELDS } })
+      )
     );
     results.push(...((res.data ?? []).filter(Boolean) as S2Paper[]));
   }

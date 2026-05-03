@@ -16,9 +16,10 @@ router.post('/search', requireAuth, async (req: AuthRequest, res: Response): Pro
 
     const graph = await buildCitationGraph(topic.trim());
     res.json(graph);
-  } catch (err) {
-    console.error('Graph search error:', err);
-    res.status(500).json({ error: 'Failed to build citation graph' });
+  } catch (err: any) {
+    const msg = err?.response?.data ?? err?.message ?? String(err);
+    console.error('Graph search error:', msg);
+    res.status(500).json({ error: 'Failed to build citation graph', detail: msg });
   }
 });
 

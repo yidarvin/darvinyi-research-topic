@@ -93,17 +93,17 @@ export async function buildCitationGraph(topic: string): Promise<CitationGraph> 
   const edges: GraphEdge[] = [];
 
   // ── Step 1: Search Semantic Scholar for top papers ──
-  const s2Results = await searchPapers(topic, 15);
+  const s2Results = await searchPapers(topic, 10);
 
   // ── Step 2: Search arXiv and cross-reference ──
-  const arxivResults = await searchArxiv(topic, 15);
+  const arxivResults = await searchArxiv(topic, 10);
 
   // Get arXiv papers that aren't already in S2 results
   const s2ArxivIds = new Set(s2Results.map((p) => p.externalIds?.ArXiv).filter(Boolean));
   const newArxivIds = arxivResults
     .map((p) => p.arxivId)
     .filter((id) => !s2ArxivIds.has(id))
-    .slice(0, 10);
+    .slice(0, 5);
 
   // Fetch S2 data for arXiv-only papers
   const arxivS2Papers =
@@ -127,7 +127,7 @@ export async function buildCitationGraph(topic: string): Promise<CitationGraph> 
 
   for (const paperId of seedPaperIds) {
     try {
-      const refs = await getReferences(paperId, 30);
+      const refs = await getReferences(paperId, 20);
       for (const ref of refs) {
         if (!ref.paperId) continue;
 
@@ -154,7 +154,7 @@ export async function buildCitationGraph(topic: string): Promise<CitationGraph> 
 
   // ── Step 4: Batch fetch full data for referenced papers ──
   // Prioritize by citation count (we already have partial data from refs endpoint)
-  const refIds = Array.from(refPaperIds).slice(0, 60); // cap at 60 reference nodes
+  const refIds = Array.from(refPaperIds).slice(0, 40); // cap at 40 reference nodes
   if (refIds.length > 0) {
     const refPapers = await batchGetPapers(refIds);
     for (const paper of refPapers) {

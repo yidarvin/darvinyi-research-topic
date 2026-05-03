@@ -40,8 +40,11 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT} (${process.env.NODE_ENV ?? 'development'})`);
 });
+
+// Graph builds can take up to 90s with rate limiting — extend timeout
+server.timeout = 120000;
 
 export default app;
