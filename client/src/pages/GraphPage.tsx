@@ -22,6 +22,11 @@ export default function GraphPage({ initialTopic }: Props) {
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
 
+  // Expand node state
+  const [expandingNodeId, setExpandingNodeId] = useState<string | null>(null);
+  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
+  const [expandError, setExpandError] = useState('');
+
   // Filters
   const [showFilters, setShowFilters] = useState(false);
   const [yearRange, setYearRange] = useState<[number, number]>([1990, new Date().getFullYear()]);
@@ -88,6 +93,47 @@ export default function GraphPage({ initialTopic }: Props) {
   const handleNodeSelect = useCallback((node: GraphNode) => {
     setSelectedNode((prev) => (prev?.id === node.id ? null : node));
   }, []);
+
+  async function handleExpand(nodeId: string) {
+    if (!graph || expandingNodeId) return;
+    setExpandingNodeId(nodeId);
+    setExpandError('');
+    try {
+      const existingNodeIds = graph.nodes.map((n) => n.id);
+      const res = await graphApi.expand(nodeId, existingNodeIds);
+      const { nodes: newNodes, edges: newEdges } = res.data;
+
+      setGraph((prev) => {
+        if (!prev) return prev;
+        // Merge: deduplicate nodes by id
+        const existingIds = new Set(prev.nodes.map((n) => n.id));
+        const uniqueNewNodes = newNodes.filter((n) => !existingIds.has(n.id));
+        // Merge edges: deduplicate by source+target
+        const existingEdgeKeys = new Set(
+          prev.edges.map((e) => {
+            const src = typeof e.source === 'string' ? e.source : (e.source as GraphNode).id;
+            const tgt = typeof e.target === 'string' ? e.target : (e.target as GraphNode).id;
+            return `${src}->${tgt}`;
+          })
+        );
+        const uniqueNewEdges = newEdges.filter(
+          (e) => !existingEdgeKeys.has(`${e.source}->${e.target}`)
+        );
+        return {
+          ...prev,
+          nodes: [...prev.nodes, ...uniqueNewNodes],
+          edges: [...prev.edges, ...uniqueNewEdges],
+        };
+      });
+
+      setExpandedNodeIds((prev) => new Set(prev).add(nodeId));
+      setSavedId(null); // graph changed, mark as unsaved
+    } catch (err: any) {
+      setExpandError(err.response?.data?.error ?? 'Failed to expand node');
+    } finally {
+      setExpandingNodeId(null);
+    }
+  }
 
   const graphStats = graph
     ? `${graph.nodes.length} papers · ${graph.edges.length} citations`
@@ -328,6 +374,10 @@ export default function GraphPage({ initialTopic }: Props) {
           <PaperPanel
             node={selectedNode}
             onClose={() => setSelectedNode(null)}
+            onExpand={handleExpand}
+            expandingNodeId={expandingNodeId}
+            expandedNodeIds={expandedNodeIds}
+            expandError={expandError}
           />
         )}
       </div>

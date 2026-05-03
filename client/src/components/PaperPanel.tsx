@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, ExternalLink, Sparkles, BookOpen, Users, Calendar, Quote } from 'lucide-react';
+import { X, ExternalLink, Sparkles, BookOpen, Users, Calendar, Quote, GitBranch, Loader2, CheckCircle2 } from 'lucide-react';
 import type { GraphNode } from '../types';
 import { streamSummary } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
@@ -7,6 +7,10 @@ import { useAuth } from '../hooks/useAuth';
 interface Props {
   node: GraphNode | null;
   onClose: () => void;
+  onExpand: (nodeId: string) => void;
+  expandingNodeId: string | null;
+  expandedNodeIds: Set<string>;
+  expandError: string;
 }
 
 function MarkdownLine({ text }: { text: string }) {
@@ -40,7 +44,7 @@ function SummaryText({ text }: { text: string }) {
   );
 }
 
-export default function PaperPanel({ node, onClose }: Props) {
+export default function PaperPanel({ node, onClose, onExpand, expandingNodeId, expandedNodeIds, expandError }: Props) {
   const { token, user } = useAuth();
   const [summary, setSummary] = useState('');
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -95,16 +99,58 @@ export default function PaperPanel({ node, onClose }: Props) {
         <h2 className="text-sm font-semibold leading-snug pr-2 flex-1" style={{ color: 'var(--text-primary)' }}>
           {node.title}
         </h2>
-        <button
-          onClick={onClose}
-          className="shrink-0 p-1 rounded transition-colors"
-          style={{ color: 'var(--text-secondary)' }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
-        >
-          <X size={16} />
-        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          {/* Expand button */}
+          {(() => {
+            const isExpanding = expandingNodeId === node.id;
+            const isExpanded = expandedNodeIds.has(node.id);
+            const isOtherExpanding = !!expandingNodeId && expandingNodeId !== node.id;
+            return (
+              <button
+                onClick={() => !isExpanded && !isExpanding && !isOtherExpanding && onExpand(node.id)}
+                disabled={isExpanded || isExpanding || isOtherExpanding}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-opacity"
+                style={{
+                  background: isExpanded ? '#14532d' : 'var(--bg-secondary)',
+                  color: isExpanded ? '#86efac' : isExpanding ? 'var(--accent)' : 'var(--text-secondary)',
+                  opacity: isOtherExpanding ? 0.4 : 1,
+                  cursor: isExpanded || isExpanding || isOtherExpanding ? 'not-allowed' : 'pointer',
+                  border: '1px solid var(--border)',
+                }}
+                title={isExpanded ? 'Already expanded' : 'Fetch this paper\'s references and add them to the graph'}
+              >
+                {isExpanding ? (
+                  <Loader2 size={11} className="animate-spin" />
+                ) : isExpanded ? (
+                  <CheckCircle2 size={11} />
+                ) : (
+                  <GitBranch size={11} />
+                )}
+                {isExpanding ? 'Expanding…' : isExpanded ? 'Expanded' : 'Expand'}
+              </button>
+            );
+          })()}
+
+          <button
+            onClick={onClose}
+            className="p-1 rounded transition-colors"
+            style={{ color: 'var(--text-secondary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
+          >
+            <X size={16} />
+          </button>
+        </div>
       </div>
+
+      {/* Expand error */}
+      {expandError && expandingNodeId === null && (
+        <div className="px-4 pt-2">
+          <p className="text-xs px-3 py-2 rounded-lg" style={{ background: '#3b1a1a', color: 'var(--danger)' }}>
+            {expandError}
+          </p>
+        </div>
+      )}
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">

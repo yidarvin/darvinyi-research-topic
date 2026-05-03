@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { CitationGraph, SavedGraph, User } from '../types';
+import type { CitationGraph, GraphNode, GraphEdge, SavedGraph, User } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -32,6 +32,11 @@ export const graphApi = {
   list: () => api.get<SavedGraph[]>('/graph/list'),
   get: (id: string) => api.get<{ graphJson: CitationGraph; topic: string }>(`/graph/${id}`),
   delete: (id: string) => api.delete(`/graph/${id}`),
+  expand: (paperId: string, existingNodeIds: string[]) =>
+    api.post<{ nodes: GraphNode[]; edges: GraphEdge[] }>('/graph/expand', {
+      paperId,
+      existingNodeIds,
+    }),
 };
 
 // ── Paper summary (SSE streaming) ──
