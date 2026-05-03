@@ -102,6 +102,7 @@ export default function GraphPage({ initialTopic }: Props) {
       const existingNodeIds = graph.nodes.map((n) => n.id);
       const res = await graphApi.expand(nodeId, existingNodeIds);
       const { nodes: newNodes, edges: newEdges } = res.data;
+      console.log(`[Expand] received ${newNodes.length} new nodes, ${newEdges.length} new edges`);
 
       setGraph((prev) => {
         if (!prev) return prev;
@@ -119,6 +120,7 @@ export default function GraphPage({ initialTopic }: Props) {
         const uniqueNewEdges = newEdges.filter(
           (e) => !existingEdgeKeys.has(`${e.source}->${e.target}`)
         );
+        console.log(`[Expand] merging: ${uniqueNewNodes.length} nodes, ${uniqueNewEdges.length} edges → total ${prev.nodes.length + uniqueNewNodes.length} nodes`);
         return {
           ...prev,
           nodes: [...prev.nodes, ...uniqueNewNodes],
