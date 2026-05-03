@@ -6,6 +6,10 @@ const API_KEY = process.env.SEMANTIC_SCHOLAR_API_KEY;
 const PAPER_FIELDS =
   'paperId,title,abstract,year,authors,citationCount,influentialCitationCount,referenceCount,externalIds,isOpenAccess,openAccessPdf,tldr,publicationDate,publicationVenue,fieldsOfStudy';
 
+// Bulk search endpoint supports a reduced field set (no tldr, no openAccessPdf)
+const BULK_PAPER_FIELDS =
+  'paperId,title,abstract,year,authors,citationCount,influentialCitationCount,referenceCount,externalIds,isOpenAccess,publicationDate,publicationVenue,fieldsOfStudy';
+
 const s2 = axios.create({
   baseURL: BASE_URL,
   headers: API_KEY ? { 'x-api-key': API_KEY } : {},
@@ -95,7 +99,7 @@ export async function searchPapersBycitations(query: string, limit = 25): Promis
       const res = await s2.get('/paper/search/bulk', {
         params: {
           query,
-          fields: PAPER_FIELDS,
+          fields: BULK_PAPER_FIELDS,
           sort: 'citationCount:desc',
         },
       });
