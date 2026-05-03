@@ -1,15 +1,13 @@
 import {
   searchPapers,
-  getPaper,
+  searchPapersBycitations,
   getReferences,
-  batchGetPapers,
   S2Paper,
 } from './semanticScholar';
-import { searchArxiv } from './arxiv';
 import { prisma } from '../lib/prisma';
 
 export interface GraphNode {
-  id: string; // s2 paperId
+  id: string;
   title: string;
   abstract?: string;
   year?: number;
@@ -21,12 +19,12 @@ export interface GraphNode {
   fieldsOfStudy?: string[];
   openAccessPdf?: string;
   tldr?: string;
-  isSeed: boolean; // is this a top-level search result
+  isSeed: boolean;
 }
 
 export interface GraphEdge {
-  source: string; // paperId that cites
-  target: string; // paperId being cited
+  source: string;
+  target: string;
   isInfluential: boolean;
 }
 
@@ -37,7 +35,7 @@ export interface CitationGraph {
   generatedAt: string;
 }
 
-function s2PaperToNode(paper: S2Paper, isSeed: boolean): GraphNode {
+function s2PaperToNode(paper: S2Paper): GraphNode {
   return {
     id: paper.paperId,
     title: paper.title,
@@ -51,7 +49,7 @@ function s2PaperToNode(paper: S2Paper, isSeed: boolean): GraphNode {
     fieldsOfStudy: paper.fieldsOfStudy ?? [],
     openAccessPdf: paper.openAccessPdf?.url,
     tldr: paper.tldr?.text,
-    isSeed,
+    isSeed: true,
   };
 }
 
@@ -82,109 +80,67 @@ async function upsertPaperToDb(paper: S2Paper): Promise<void> {
       },
     });
   } catch (err) {
-    // Non-critical: log and continue
     console.error('Failed to upsert paper to DB:', err);
   }
 }
 
 export async function buildCitationGraph(topic: string): Promise<CitationGraph> {
-  const nodeMap = new Map<string, GraphNode>();
-  const edgeSet = new Set<string>(); // "source->target"
-  const edges: GraphEdge[] = [];
+  // ── Step 1: Fetch up to 50 papers via two passes ──
+  // Pass A: relevance-ranked (best semantic match for the query), up to 25
+  // Pass B: most-cited papers for the query (bulk endpoint, sorted by citationCount desc), up to 25
+  // Together they give a good mix of canonical foundational papers + recent relevant work.
+  const passA = await searchPapers(topic, 25);
+  const passB = await searchPapersBycitations(topic, 25);
 
-  // ── Step 1: Search Semantic Scholar for top papers ──
-  const s2Results = await searchPapers(topic, 10);
+  // Deduplicate by paperId, keeping up to 50
+  const seen = new Set<string>();
+  const allPapers: S2Paper[] = [];
+  for (const paper of [...passA, ...passB]) {
+    if (!paper?.paperId || seen.has(paper.paperId)) continue;
+    seen.add(paper.paperId);
+    allPapers.push(paper);
+    if (allPapers.length >= 50) break;
+  }
 
-  // ── Step 2: Search arXiv and cross-reference ──
-  const arxivResults = await searchArxiv(topic, 10);
+  // ── Step 2: Upsert all papers to DB and build node map ──
+  const seedIds = new Set<string>(allPapers.map((p) => p.paperId));
+  const nodes: GraphNode[] = [];
 
-  // Get arXiv papers that aren't already in S2 results
-  const s2ArxivIds = new Set(s2Results.map((p) => p.externalIds?.ArXiv).filter(Boolean));
-  const newArxivIds = arxivResults
-    .map((p) => p.arxivId)
-    .filter((id) => !s2ArxivIds.has(id))
-    .slice(0, 5);
-
-  // Fetch S2 data for arXiv-only papers
-  const arxivS2Papers =
-    newArxivIds.length > 0
-      ? await batchGetPapers(newArxivIds.map((id) => `ArXiv:${id}`))
-      : [];
-
-  // Combine seed papers (deduplicated)
-  const allSeedPapers = [...s2Results, ...arxivS2Papers];
-  const seedPaperIds = new Set<string>();
-
-  for (const paper of allSeedPapers) {
-    if (!paper?.paperId || seedPaperIds.has(paper.paperId)) continue;
-    seedPaperIds.add(paper.paperId);
-    nodeMap.set(paper.paperId, s2PaperToNode(paper, true));
+  for (const paper of allPapers) {
+    nodes.push(s2PaperToNode(paper));
     await upsertPaperToDb(paper);
   }
 
-  // ── Step 3: Fetch references for each seed paper (1 hop) ──
-  const refPaperIds = new Set<string>();
+  // ── Step 3: Discover edges between seed papers ──
+  // For each seed, fetch its references. Only keep edges where BOTH
+  // source and target are in the seed set (no new nodes added here).
+  const edgeSet = new Set<string>();
+  const edges: GraphEdge[] = [];
 
-  for (const paperId of seedPaperIds) {
+  for (const paper of allPapers) {
     try {
-      const refs = await getReferences(paperId, 20);
+      const refs = await getReferences(paper.paperId, 50);
       for (const ref of refs) {
-        if (!ref.paperId) continue;
-
-        // Add edge: seed → reference
-        const edgeKey = `${paperId}->${ref.paperId}`;
-        if (!edgeSet.has(edgeKey)) {
-          edgeSet.add(edgeKey);
-          edges.push({
-            source: paperId,
-            target: ref.paperId,
-            isInfluential: ref.isInfluential ?? false,
-          });
-        }
-
-        // Track reference nodes to fetch full data
-        if (!nodeMap.has(ref.paperId)) {
-          refPaperIds.add(ref.paperId);
-        }
+        if (!ref.paperId || !seedIds.has(ref.paperId)) continue;
+        const key = `${paper.paperId}->${ref.paperId}`;
+        if (edgeSet.has(key)) continue;
+        edgeSet.add(key);
+        edges.push({
+          source: paper.paperId,
+          target: ref.paperId,
+          isInfluential: ref.isInfluential ?? false,
+        });
       }
     } catch (err) {
-      console.error(`Failed to get references for ${paperId}:`, err);
+      console.error(`Failed to get references for ${paper.paperId}:`, err);
     }
   }
 
-  // ── Step 4: Batch fetch full data for referenced papers ──
-  // Prioritize by citation count (we already have partial data from refs endpoint)
-  const refIds = Array.from(refPaperIds).slice(0, 40); // cap at 40 reference nodes
-  if (refIds.length > 0) {
-    const refPapers = await batchGetPapers(refIds);
-    for (const paper of refPapers) {
-      if (!paper?.paperId) continue;
-      nodeMap.set(paper.paperId, s2PaperToNode(paper, false));
-      await upsertPaperToDb(paper);
-    }
-  }
-
-  // ── Step 5: Filter edges to only include nodes we have ──
-  const validEdges = edges.filter(
-    (e) => nodeMap.has(e.source) && nodeMap.has(e.target)
-  );
-
-  // ── Step 6: Remove isolated reference nodes (no edges) ──
-  const connectedNodeIds = new Set<string>();
-  for (const edge of validEdges) {
-    connectedNodeIds.add(edge.source);
-    connectedNodeIds.add(edge.target);
-  }
-  // Always keep seed nodes
-  for (const id of seedPaperIds) connectedNodeIds.add(id);
-
-  const finalNodes = Array.from(nodeMap.values()).filter((n) =>
-    connectedNodeIds.has(n.id)
-  );
+  console.log(`Graph built: ${nodes.length} nodes, ${edges.length} intra-set edges`);
 
   return {
-    nodes: finalNodes,
-    edges: validEdges,
+    nodes,
+    edges,
     topic,
     generatedAt: new Date().toISOString(),
   };

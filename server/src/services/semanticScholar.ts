@@ -88,6 +88,23 @@ export async function searchPapers(query: string, limit = 20): Promise<S2Paper[]
   );
 }
 
+// Search by citation count (most-cited papers for a query) using bulk endpoint
+export async function searchPapersBycitations(query: string, limit = 25): Promise<S2Paper[]> {
+  return rateLimited(() =>
+    withRetry(async () => {
+      const res = await s2.get('/paper/search/bulk', {
+        params: {
+          query,
+          fields: PAPER_FIELDS,
+          sort: 'citationCount:desc',
+        },
+      });
+      const data = (res.data.data ?? []) as S2Paper[];
+      return data.slice(0, limit);
+    })
+  );
+}
+
 export async function getPaper(paperId: string): Promise<S2Paper | null> {
   return rateLimited(() =>
     withRetry(async () => {

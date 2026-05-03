@@ -316,6 +316,9 @@ export default function GraphPage({ initialTopic }: Props) {
               <p className="text-sm mt-1">
                 e.g. "attention mechanisms in transformers" or "CRISPR gene editing"
               </p>
+              <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>
+                Returns the top 50 most relevant and cited papers. Click a node to expand its references.
+              </p>
             </div>
           )}
 
@@ -324,10 +327,10 @@ export default function GraphPage({ initialTopic }: Props) {
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
               <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent)' }} />
               <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                Fetching papers and building citation graph…
+                Fetching top 50 papers and detecting connections…
               </p>
               <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                This may take 15–30 seconds
+                This may take 30–60 seconds
               </p>
             </div>
           )}
