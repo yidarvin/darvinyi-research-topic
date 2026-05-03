@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id               String       @id @default(cuid())
+  email            String       @unique
+  passwordHash     String
+  anthropicKeyEnc  String?      // AES-256-GCM encrypted Anthropic API key
+  anthropicKeyIv   String?      // IV for decryption
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  savedGraphs      SavedGraph[]
+
+  @@map("users")
+}
+
+model SavedGraph {
+  id        String   @id @default(cuid())
+  userId    String
+  topic     String
+  graphJson Json     // Full graph data: nodes + edges
+  nodeCount Int      @default(0)
+  edgeCount Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("saved_graphs")
+}
+
+model Paper {
+  id             String    @id @default(cuid())
+  s2PaperId      String    @unique
+  arxivId        String?
+  title          String
+  abstract       String?
+  year           Int?
+  authors        Json      // Array of {name, authorId}
+  citationCount  Int       @default(0)
+  influentialCitationCount Int @default(0)
+  venue          String?
+  fieldsOfStudy  Json?     // Array of strings
+  externalIds    Json?     // {DOI, ArXiv, etc.}
+  openAccessPdf  String?
+  tldr           String?
+  metadataJson   Json?     // Full raw API response
+  fetchedAt      DateTime  @default(now())
+  summary        Summary?
+
+  @@index([arxivId])
+  @@map("papers")
+}
+
+model Summary {
+  id          String   @id @default(cuid())
+  paperId     String   @unique
+  summaryText String   @db.Text
+  modelUsed   String   @default("claude-3-5-sonnet-20241022")
+  createdAt   DateTime @default(now())
+  paper       Paper    @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@map("summaries")
+}

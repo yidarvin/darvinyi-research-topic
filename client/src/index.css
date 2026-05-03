@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #0f1117;
+  --bg-secondary: #1a1d27;
+  --bg-card: #1e2130;
+  --border: #2d3148;
+  --text-primary: #e8eaf0;
+  --text-secondary: #8b91a8;
+  --accent: #6366f1;
+  --accent-hover: #4f52d9;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+/* D3 graph styles */
+.graph-container {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.graph-node {
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.graph-node:hover {
+  opacity: 0.85;
+}
+
+.graph-node.selected circle {
+  stroke: #fff;
+  stroke-width: 3px;
+}
+
+.graph-link {
+  stroke: #2d3148;
+  stroke-opacity: 0.6;
+  fill: none;
+}
+
+.graph-link.influential {
+  stroke: #6366f1;
+  stroke-opacity: 0.9;
+}
+
+.graph-label {
+  font-size: 11px;
+  fill: #8b91a8;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3d4265;
+}
+
+/* SSE summary stream */
+.summary-text {
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+
+.summary-text strong,
+.summary-text b {
+  color: #a5b4fc;
+}
