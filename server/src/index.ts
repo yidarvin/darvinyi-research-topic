@@ -6,7 +6,6 @@ import path from 'path';
 import authRouter from './routes/auth';
 import graphRouter from './routes/graph';
 import paperRouter from './routes/paper';
-import expandRouter from './routes/expand';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -25,7 +24,6 @@ app.use(express.json({ limit: '10mb' }));
 app.use('/api/auth', authRouter);
 app.use('/api/user', authRouter); // apikey routes live in authRouter
 app.use('/api/graph', graphRouter);
-app.use('/api/graph/expand', expandRouter);
 app.use('/api/paper', paperRouter);
 
 // ── Health check ──

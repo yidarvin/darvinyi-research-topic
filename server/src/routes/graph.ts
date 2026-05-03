@@ -1,7 +1,49 @@
 import { Router, Response } from 'express';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { buildCitationGraph } from '../services/graphBuilder';
+import { getReferences, batchGetPapers, S2Paper } from '../services/semanticScholar';
 import { prisma } from '../lib/prisma';
+
+// ── Expand helpers ──
+interface ExpandNode {
+  id: string; title: string; abstract?: string; year?: number;
+  authors: { name: string; authorId?: string }[];
+  citationCount: number; influentialCitationCount: number;
+  arxivId?: string; venue?: string; fieldsOfStudy?: string[];
+  openAccessPdf?: string; tldr?: string; isSeed: boolean;
+}
+
+function s2ToExpandNode(paper: S2Paper): ExpandNode {
+  return {
+    id: paper.paperId, title: paper.title, abstract: paper.abstract,
+    year: paper.year, authors: paper.authors ?? [],
+    citationCount: paper.citationCount ?? 0,
+    influentialCitationCount: paper.influentialCitationCount ?? 0,
+    arxivId: paper.externalIds?.ArXiv,
+    venue: paper.publicationVenue?.name ?? undefined,
+    fieldsOfStudy: paper.fieldsOfStudy ?? [],
+    openAccessPdf: paper.openAccessPdf?.url,
+    tldr: paper.tldr?.text, isSeed: false,
+  };
+}
+
+async function upsertExpandPaper(paper: S2Paper): Promise<void> {
+  try {
+    await prisma.paper.upsert({
+      where: { s2PaperId: paper.paperId },
+      update: { citationCount: paper.citationCount ?? 0, influentialCitationCount: paper.influentialCitationCount ?? 0, fetchedAt: new Date() },
+      create: {
+        s2PaperId: paper.paperId, arxivId: paper.externalIds?.ArXiv ?? null,
+        title: paper.title, abstract: paper.abstract ?? null, year: paper.year ?? null,
+        authors: paper.authors ?? [], citationCount: paper.citationCount ?? 0,
+        influentialCitationCount: paper.influentialCitationCount ?? 0,
+        venue: paper.publicationVenue?.name ?? null, fieldsOfStudy: paper.fieldsOfStudy ?? [],
+        externalIds: paper.externalIds ?? {}, openAccessPdf: paper.openAccessPdf?.url ?? null,
+        tldr: paper.tldr?.text ?? null, metadataJson: paper as any,
+      },
+    });
+  } catch (err) { console.error('Failed to upsert paper:', err); }
+}
 
 const router = Router();
 
@@ -71,6 +113,45 @@ router.get('/list', requireAuth, async (req: AuthRequest, res: Response): Promis
   } catch (err) {
     console.error('Graph list error:', err);
     res.status(500).json({ error: 'Failed to fetch graphs' });
+  }
+});
+
+// POST /api/graph/expand — fetch references for a node and return new nodes/edges
+router.post('/expand', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { paperId, existingNodeIds } = req.body;
+    if (!paperId || typeof paperId !== 'string') {
+      res.status(400).json({ error: 'paperId is required' });
+      return;
+    }
+
+    const existingIds = new Set<string>(Array.isArray(existingNodeIds) ? existingNodeIds : []);
+    const refs = await getReferences(paperId, 20);
+
+    const newRefIds = refs
+      .filter((r) => r.paperId && !existingIds.has(r.paperId))
+      .map((r) => r.paperId);
+
+    // All edges from expanded node (including to already-existing nodes for connectivity)
+    const newEdges = refs
+      .filter((r) => r.paperId)
+      .map((r) => ({ source: paperId, target: r.paperId, isInfluential: r.isInfluential ?? false }));
+
+    let newNodes: ExpandNode[] = [];
+    if (newRefIds.length > 0) {
+      const papers = await batchGetPapers(newRefIds);
+      for (const paper of papers) {
+        if (!paper?.paperId) continue;
+        newNodes.push(s2ToExpandNode(paper));
+        await upsertExpandPaper(paper);
+      }
+    }
+
+    console.log(`Expand ${paperId}: ${newNodes.length} new nodes, ${newEdges.length} edges`);
+    res.json({ nodes: newNodes, edges: newEdges });
+  } catch (err: any) {
+    console.error('Expand error:', err?.message ?? err);
+    res.status(500).json({ error: 'Failed to expand node' });
   }
 });
 
